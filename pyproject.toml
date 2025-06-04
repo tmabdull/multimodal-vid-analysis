@@ -1,0 +1,26 @@
+[tool.poetry]
+name = "multimodal-vid-analysis"
+version = "0.1.0"
+description = ""
+authors = ["Taha Abdullah", "Manthan Desai", "Youssef Qteishat"]
+readme = "README.md"
+package-mode = false
+
+[tool.poetry.dependencies]
+python = ">=3.10,<3.12"
+youtube-transcript-api = "*"
+yt-dlp = "*"
+ffmpeg-python = "*"
+opencv-python = "*"
+numpy = "*"
+pillow = "*"
+tqdm = "*"
+chromadb = "*"
+langchain-core = "*"
+langchain-community = "*"
+langchain-text-splitters = "*"
+langchain-huggingface = "*"
+transformers = "*"
+sentence-transformers = "*"
+torch = "^2.7.0"
+torchvision = "^0.22.0"
