@@ -269,10 +269,13 @@ def store_vid_embeddings(vid_id, frame_embeddings, collection_name):
     return vector_store
 
 # Main querying function
-def visual_query(query_text, max_k=20, similarity_threshold=0.3, 
+def visual_query(query_text, max_k=20, similarity_threshold=0.1, 
                 collection_name="video_frame_embeddings"):
-    """Perform visual similarity search using LangChain"""
+    """
+    Perform visual similarity search using LangChain
+    """
     # Initialize Chroma with CLIP embeddings
+    print("Accessing collection:", collection_name)
     vector_store = Chroma(
         collection_name=collection_name,
         embedding_function=CLIPImageEmbeddings(),
@@ -281,6 +284,7 @@ def visual_query(query_text, max_k=20, similarity_threshold=0.3,
     )
     
     # Perform similarity search with threshold
+    print("Running similarity search...")
     results = vector_store.similarity_search_with_relevance_scores(
         query=query_text,
         k=max_k,
@@ -297,9 +301,9 @@ def visual_query(query_text, max_k=20, similarity_threshold=0.3,
     return matches
 
 # Main visual processing + embedding function
-def process_video_visuals(youtube_url, loaded=False, output_dir="./video_data",
-                         chroma_collection_name="video_frame_embeddings"):
-    '''Main video processing pipeline'''
+def create_vid_embeddings(youtube_url, loaded=False, output_dir="./video_data",
+                          chroma_collection_name="video_frame_embeddings"):
+    
     metadata = get_video_metadata(youtube_url)
     vid_id = metadata['video_id']
     
@@ -347,14 +351,14 @@ def process_video_visuals(youtube_url, loaded=False, output_dir="./video_data",
     print("Storing embeddings...")
     store_vid_embeddings(vid_id, frame_embeddings, chroma_collection_name)
     
-    return 0
+    return chroma_collection_name
 
 if __name__ == "__main__":
     youtube_url, query = "https://www.youtube.com/watch?v=M_uPKpvf918", "diagram"
     # youtube_url, query = "https://www.youtube.com/watch?v=yYFmYWpMPlE", "tech stack diagram"
-    youtube_url, query = "https://www.youtube.com/watch?v=SaSZdCauekg", "teddy bear"
+    # youtube_url, query = "https://www.youtube.com/watch?v=SaSZdCauekg", "teddy bear"
 
-    process_video_visuals(youtube_url, loaded=True)
+    create_vid_embeddings(youtube_url, loaded=False)
     print("Embeddings stored! Starting visual query...")
     matches = visual_query(query, max_k=1000, similarity_threshold=0.01)
     matches_sorted_by_score = sorted(matches, key=lambda x: x["score"])
