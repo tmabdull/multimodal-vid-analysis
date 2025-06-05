@@ -1,11 +1,19 @@
-from youtube_transcript_api import YouTubeTranscriptApi
 import yt_dlp
+import re
+import torch
+import chromadb
+import cv2
+import os
+import numpy as np
+from pathlib import Path
+from PIL import Image
+from transformers import CLIPProcessor, CLIPModel
 
+# Video Processing
 def extract_video_id(youtube_url):
     """
     Extracts the video ID from a YouTube URL.
     """
-    import re
     patterns = [
         r'(?:v=|\/)([0-9A-Za-z_-]{11}).*',
         r'(?:embed\/)([0-9A-Za-z_-]{11})',
@@ -23,8 +31,8 @@ def get_video_metadata(youtube_url):
     
     # Use yt-dlp for metadata extraction
     ydl_opts = {
-        'quiet': True,
-        'no_warnings': True,
+        # 'quiet': True,
+        # 'no_warnings': True,
     }
     
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -42,36 +50,7 @@ def get_video_metadata(youtube_url):
     
     return metadata
 
-from youtube_transcript_api import YouTubeTranscriptApi
-
-def get_transcript_with_timestamps(video_id):
-    """
-    Fetches the transcript and returns a list of dicts with text, start, and duration.
-    """
-    try:
-        # This returns a list of dicts, each with 'text', 'start', 'duration'
-        transcript = YouTubeTranscriptApi.get_transcript(video_id)
-        for entry in transcript:
-            # Each entry is a dict: {'text': ..., 'start': ..., 'duration': ...}
-            entry['end'] = entry['start'] + entry['duration']
-        return transcript
-    except Exception as e:
-        print(f"Error extracting transcript: {e}")
-        return None
-
-def format_timestamp(seconds):
-    """Convert seconds to HH:MM:SS format"""
-    hours = int(seconds // 3600)
-    minutes = int((seconds % 3600) // 60)
-    seconds = int(seconds % 60)
-    return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
-
-import cv2
-import os
-import numpy as np
-from pathlib import Path
-
-def extract_frames_opencv(video_url, output_dir, interval_seconds=5):
+def extract_raw_frames(video_url, output_dir, interval_seconds=5):
     """Extract frames at regular intervals using OpenCV"""
     
     # Create output directory
@@ -134,61 +113,11 @@ def extract_frames_opencv(video_url, output_dir, interval_seconds=5):
     
     return extracted_frames
 
-def chunk_transcript_with_timestamps(transcript_data, chunk_size=1000, overlap=200):
-    """Split transcript into chunks while preserving timestamp ranges"""
-    chunks = []
-    current_chunk = ""
-    current_start_time = None
-    current_end_time = None
-    current_length = 0
-    
-    for entry in transcript_data:
-        text = entry['text']
-        start_time = entry['start_time']
-        end_time = entry['end_time']
-        
-        # Initialize first chunk
-        if current_start_time is None:
-            current_start_time = start_time
-        
-        # Check if adding this text exceeds chunk size
-        if current_length + len(text) > chunk_size and current_chunk:
-            # Save current chunk
-            chunks.append({
-                'text': current_chunk.strip(),
-                'start_time': current_start_time,
-                'end_time': current_end_time,
-                'chunk_index': len(chunks)
-            })
-            
-            # Start new chunk with overlap
-            overlap_text = current_chunk[-overlap:] if len(current_chunk) > overlap else current_chunk
-            current_chunk = overlap_text + " " + text
-            current_start_time = start_time
-            current_length = len(current_chunk)
-        else:
-            # Add to current chunk
-            current_chunk += " " + text
-            current_length += len(text)
-        
-        current_end_time = end_time
-    
-    # Add final chunk
-    if current_chunk:
-        chunks.append({
-            'text': current_chunk.strip(),
-            'start_time': current_start_time,
-            'end_time': current_end_time,
-            'chunk_index': len(chunks)
-        })
-    
-    return chunks
-
-def preprocess_frames(frame_paths, target_size=(224, 224)):
+def preprocess_frames(raw_frames, target_size=(224, 224)):
     """Normalize and resize frames for consistent processing"""
     processed_frames = []
     
-    for frame_info in frame_paths:
+    for frame_info in raw_frames:
         frame_path = frame_info['frame_path']
         
         # Read and preprocess frame
@@ -220,12 +149,12 @@ def preprocess_frames(frame_paths, target_size=(224, 224)):
     
     return processed_frames
 
-def detect_scene_changes(frame_paths, threshold=0.3):
+def filter_significant_frames(processed_frames, threshold=0.3):
     """Apply motion detection to focus on relevant visual content"""
     scene_frames = []
     prev_frame = None
 
-    for frame_info in frame_paths:
+    for frame_info in processed_frames:
         frame = cv2.imread(frame_info['processed_path'], cv2.IMREAD_GRAYSCALE)
         
         if prev_frame is not None:
@@ -256,55 +185,97 @@ def detect_scene_changes(frame_paths, threshold=0.3):
         
         prev_frame = frame
     
-    return scene_frames
-
-def process_youtube_video_step1(youtube_url, output_dir="./video_data"):
-    """Complete Step 1 processing pipeline"""
-    
-    print("Extracting video metadata...")
-    metadata = get_video_metadata(youtube_url)
-    video_id = metadata['video_id']
-
-    print("Metadata:", metadata)
-    
-    # print("Downloading transcript...")
-    # transcript = get_transcript_with_timestamps(video_id)
-    # if transcript is None:
-    #     raise Exception("Could not extract transcript from video")
-    
-    print("Extracting video frames...")
-    frame_output_dir = os.path.join(output_dir, video_id, "frames")
-    extracted_frames = extract_frames_opencv(youtube_url, frame_output_dir, interval_seconds=7)
-    
-    print("Preprocessing data...")
-    # # Chunk transcript
-    # transcript_chunks = chunk_transcript_with_timestamps(transcript)
-    
-    # Preprocess frames
-    processed_frames = preprocess_frames(extracted_frames)
-    
-    # Detect scene changes for better frame selection
-    scene_frames = detect_scene_changes(processed_frames)
-    
     # Filter to keep only significant frames (scene changes or regular intervals)
     significant_frames = [
         f for i, f in enumerate(scene_frames)
         if f['scene_change'] or i % 3 == 0
     ]  # Every 3rd frame + scene changes
     
-    return {
-        'metadata': metadata,
-        # 'transcript_chunks': transcript_chunks,
-        'frames': significant_frames,
-        # 'raw_transcript': transcript
-    }
+    return significant_frames
 
-# Usage example
+# Embeddings
+def create_vid_embeddings(vid_id, filtered_frames):
+    # Choose a model; "openai/clip-vit-base-patch16" is common and lightweight
+    model_name = "openai/clip-vit-base-patch16"
+    model = CLIPModel.from_pretrained(model_name)
+    processor = CLIPProcessor.from_pretrained(model_name, use_fast=True) # use_fast requires PyTorch
+    model.eval()
+
+    frame_embeddings = []
+
+    for frame_info in filtered_frames:
+        timestamp = frame_info['timestamp']
+        frame_path = frame_info['processed_path']
+
+        image = Image.open(frame_path).convert("RGB")
+        inputs = processor(images=image, return_tensors="pt")
+
+        with torch.no_grad():
+            image_features = model.get_image_features(**inputs)
+            image_features = image_features / image_features.norm(p=2, dim=-1, keepdim=True)
+            embedding = image_features.cpu().numpy()[0]
+
+        frame_embeddings.append({
+            'embedding': embedding,
+            'timestamp': timestamp,
+            'frame_path': frame_path
+        })
+
+    # print("Frame Embeddings[0]:", frame_embeddings[0])
+
+    return frame_embeddings
+
+def store_vid_embeddings(vid_id, frame_embeddings, collection_name):
+    client = chromadb.Client()
+    collection = client.get_or_create_collection(collection_name)
+
+    for frame in frame_embeddings:
+        collection.add(
+            embeddings=[frame['embedding']],
+            metadatas=[{
+                'timestamp': frame['timestamp'],
+                'frame_path': frame['frame_path'],
+                'video_id': vid_id
+            }],
+            ids=[f"{vid_id}_{int(frame['timestamp'])}"]
+        )
+
+    print("Embeddings stored in chroma collection:", collection_name)
+    return collection_name
+
+# Main visual processing function to be called by API route
+def process_video_visuals(youtube_url, output_dir="./video_data", 
+                        #   frame_interval_seconds=None, 
+                        #   processed_img_size=None, motion_detect_threshold=None, 
+                          chroma_collection_name="video_frame_embeddings"):
+    '''
+    Main logic for processing a YT vid, creating frame embeddings, 
+    and storing embeddings into Chroma DB for future query comparisons
+    '''
+    metadata = get_video_metadata(youtube_url)
+    vid_id = metadata['video_id']
+    if not vid_id:
+        print("WARNING: No Vid ID found")
+
+    frame_output_dir = os.path.join(output_dir, vid_id)
+
+    extracted_frames = extract_raw_frames(youtube_url, frame_output_dir)
+    processed_frames = preprocess_frames(extracted_frames)
+    significant_frames = filter_significant_frames(processed_frames)
+    
+    print(f"Processed video: {metadata}")
+    print(f"Num Raw frames extracted: {len(extracted_frames)}")    
+    print(f"Num Filtered/Processed frames: {len(significant_frames)}")    
+    
+    frame_embeddings = create_vid_embeddings(vid_id, significant_frames)
+    store_vid_embeddings(vid_id, frame_embeddings, chroma_collection_name)
+
+    return 0
+
+# TODO: Natural Language Queries and Similarity Searches
+
 if __name__ == "__main__":
     youtube_url = "https://www.youtube.com/watch?v=M_uPKpvf918"
-    result = process_youtube_video_step1(youtube_url)
-    
-    # print(f"Processed video: {result['metadata']['title']}")
-    # print(f"Duration: {result['metadata']['duration']} seconds")
-    # print(f"Transcript chunks: {len(result['transcript_chunks'])}")
-    print(f"Extracted frames: {len(result['frames'])}")
+    # youtube_url = "https://www.youtube.com/watch?v=SaSZdCauekg"
+
+    process_video_visuals(youtube_url)
