@@ -46,49 +46,51 @@ def get_video_metadata(youtube_url):
     
     return metadata
 
-def extract_raw_frames(video_url, output_dir, interval_seconds=5):
+def extract_raw_frames(youtube_url, duration, output_dir, interval_seconds=None):
     """Extract frames at regular intervals using OpenCV"""
     
-    # Create output directory
+    # Create output directory for downloaded frames
     Path(output_dir).mkdir(parents=True, exist_ok=True)
     
-    # Download video temporarily or use direct URL if supported
-    cap = cv2.VideoCapture(video_url)
-    
+    # yt-dlp download options: limit to 720p, video only (no audio)
+    ydl_opts = {
+        # 'download_sections': [{'section': {'start_time': 45, 'end_time': 115}}],
+        'format': 'bestvideo[height<=720][ext=mp4]/best[height<=720][ext=mp4]/bestvideo+bestaudio/best',
+        'outtmpl': 'temp_video.%(ext)s',
+        'retries': 3,
+        'fragment_retries': 3
+    }
+
+    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+        ydl.download([youtube_url])
+
+    # Find downloaded file
+    temp_files = [f for f in os.listdir('.') if f.startswith('temp_video') and f.endswith('.mp4')]
+    if not temp_files:
+        raise FileNotFoundError("Video download failed or file not found.")
+    temp_video_path = temp_files[0]
+
+    # Get vid properties with OpenCV
+    cap = cv2.VideoCapture(temp_video_path)
     if not cap.isOpened():
-        # If direct URL doesn't work, download video first
-        import yt_dlp
-        ydl_opts = {
-            # 'format': 'best[height<=720]',  # Limit quality for processing
-            # 'outtmpl': 'temp_video.%(ext)s'
-            'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
-            'outtmpl': 'temp_video.%(ext)s',
-            # 'continuedl': False,  # Disable resuming partial downloads
-            # 'noprogress': True,
-            # 'quiet': True,
-            # 'no_warnings': True,
-            # 'skip_unavailable_fragments': True,
-            'retries': 3,
-            'fragment_retries': 3,
-            'download_sections': [{'section': {'start_time': 45, 'end_time': 115}}]
-        }
-        
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            ydl.download([video_url])
-            
-        # Find downloaded file
-        temp_files = [f for f in os.listdir('.') if f.startswith('temp_video')]
-        if temp_files:
-            cap = cv2.VideoCapture(temp_files[0])
+        raise RuntimeError(f"OpenCV could not open video file {temp_video_path}")
     
-    # Get video properties
     fps = cap.get(cv2.CAP_PROP_FPS)
-    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-    duration = total_frames / fps
     
-    frame_interval = int(fps * interval_seconds)
+    if not interval_seconds:
+        if duration < (6 * 60):
+            interval_seconds = 5
+        elif duration < (20 * 60):
+            interval_seconds = 10
+        elif duration < (60 * 60):
+            interval_seconds = 20
+        else:
+            interval_seconds = 60
+
+    print(f"Duration (secs): {duration}, Frame Intervals (secs): {interval_seconds}")
+    frame_interval = int(fps * interval_seconds) if fps else 1
+    
     extracted_frames = []
-    
     frame_count = 0
     while True:
         ret, frame = cap.read()
@@ -97,15 +99,15 @@ def extract_raw_frames(video_url, output_dir, interval_seconds=5):
             
         # Extract frame at specified intervals
         if frame_count % frame_interval == 0:
-            timestamp = frame_count / fps
-            frame_filename = f"frame_{int(timestamp):04d}s.jpg"
-            frame_path = os.path.join(output_dir, frame_filename)
+            timestamp = frame_count / fps if fps else 0
+            raw_frame_filename = f"frame_{int(timestamp):04d}s.jpg"
+            raw_frame_path = os.path.join(output_dir, raw_frame_filename)
             
-            cv2.imwrite(frame_path, frame)
+            cv2.imwrite(raw_frame_path, frame)
             
             extracted_frames.append({
                 'timestamp': timestamp,
-                'frame_path': frame_path,
+                'raw_frame_path': raw_frame_path,
                 'frame_number': frame_count
             })
             
@@ -114,8 +116,7 @@ def extract_raw_frames(video_url, output_dir, interval_seconds=5):
     cap.release()
     
     # Clean up temporary video file
-    for temp_file in [f for f in os.listdir('.') if f.startswith('temp_video')]:
-        os.remove(temp_file)
+    os.remove(temp_video_path)
     
     return extracted_frames
 
@@ -124,10 +125,10 @@ def preprocess_frames(raw_frames, target_size=(224, 224)):
     processed_frames = []
     
     for frame_info in raw_frames:
-        frame_path = frame_info['frame_path']
+        raw_frame_path = frame_info['raw_frame_path']
         
         # Read and preprocess frame
-        frame = cv2.imread(frame_path)
+        frame = cv2.imread(raw_frame_path)
         if frame is None:
             continue
             
@@ -143,13 +144,13 @@ def preprocess_frames(raw_frames, target_size=(224, 224)):
         )
         
         # Save processed frame
-        processed_path = frame_path.replace('.jpg', '_processed.jpg')
+        processed_path = raw_frame_path.replace('.jpg', '_processed.jpg')
         cv2.imwrite(processed_path, denoised_frame)
         
         processed_frames.append({
             'timestamp': frame_info['timestamp'],
-            'original_path': frame_path,
-            'processed_path': processed_path,
+            'original_frame_path': raw_frame_path,
+            'frame_path': processed_path,
             'frame_array': denoised_frame
         })
     
@@ -161,7 +162,7 @@ def filter_significant_frames(processed_frames, threshold=0.3):
     prev_frame = None
 
     for frame_info in processed_frames:
-        frame = cv2.imread(frame_info['processed_path'], cv2.IMREAD_GRAYSCALE)
+        frame = cv2.imread(frame_info['frame_path'], cv2.IMREAD_GRAYSCALE)
         
         if prev_frame is not None:
             # Calculate frame difference
@@ -243,17 +244,17 @@ def store_vid_embeddings(vid_id, frame_embeddings, collection_name):
     # Create LangChain documents with metadata
     documents = [
         Document(
-            page_content=frame['processed_path'],  # Use path as content
+            page_content=frame['frame_path'],  # Use path as content
             metadata={
                 'timestamp': frame['timestamp'],
                 'video_id': vid_id,
-                'processed_path': frame['processed_path']
+                'frame_path': frame['frame_path']
             }
         ) for frame in frame_embeddings
     ]
     
     # Extract image paths for embedding
-    image_paths = [frame['processed_path'] for frame in frame_embeddings]
+    image_paths = [frame['frame_path'] for frame in frame_embeddings]
     
     # Initialize Chroma with CLIP embeddings
     vector_store = Chroma.from_documents(
@@ -289,14 +290,14 @@ def visual_query(query_text, max_k=20, similarity_threshold=0.3,
     # Format results
     matches = [{
         'timestamp': doc.metadata['timestamp'],
-        'processed_path': doc.metadata['processed_path'],
+        'frame_path': doc.metadata['frame_path'],
         'score': score
     } for doc, score in results]
 
     return matches
 
 # Main visual processing + embedding function
-def process_video_visuals(youtube_url, output_dir="./video_data",
+def process_video_visuals(youtube_url, loaded=False, output_dir="./video_data",
                          chroma_collection_name="video_frame_embeddings"):
     '''Main video processing pipeline'''
     metadata = get_video_metadata(youtube_url)
@@ -304,22 +305,36 @@ def process_video_visuals(youtube_url, output_dir="./video_data",
     
     frame_output_dir = os.path.join(output_dir, vid_id)
 
-    extracted_frames = extract_raw_frames(youtube_url, frame_output_dir)
-    processed_frames = preprocess_frames(extracted_frames)
+    if loaded:
+        print("Already loaded - getting processed frames from disk...")
+        # Load processed frames from disk
+        processed_frames = []
+        
+        pattern = re.compile(r"frame_(\d+)s_processed\.jpg")
+        for filename in os.listdir(frame_output_dir):
+            match = pattern.match(filename)
+            if match:
+                timestamp = float(match.group(1))
+                frame_path = os.path.join(frame_output_dir, filename)
+                processed_frames.append({'frame_path': frame_path, 'timestamp': timestamp})
+    else:
+        print("No frames found in local. Downloading and processing instead...")
+        raw_frames = extract_raw_frames(youtube_url, metadata['duration'], frame_output_dir)
+        print(f"Num Raw frames extracted: {len(raw_frames)}")   
+        processed_frames = preprocess_frames(raw_frames)
+    
     significant_frames = filter_significant_frames(processed_frames)
-
     frames_to_embed = significant_frames
     frames_to_embed = processed_frames
     
     print(f"Processed video: {metadata}")
-    print(f"Num Raw frames extracted: {len(extracted_frames)}")    
     print(f"Num Filtered/Processed frames: {len(frames_to_embed)}")   
     # print(f"Frame_to_embed 0: {frames_to_embed[0].keys()}") 
     
     # Create frame embeddings using CLIP
     print("Creating embeddings...")
     embedding_model = CLIPImageEmbeddings()
-    image_paths = [frame['processed_path'] for frame in frames_to_embed]
+    image_paths = [frame['frame_path'] for frame in frames_to_embed]
     embeddings = embedding_model.embed_documents(image_paths)
     
     # Add embeddings to frame info
@@ -335,13 +350,13 @@ def process_video_visuals(youtube_url, output_dir="./video_data",
     return 0
 
 if __name__ == "__main__":
-    # youtube_url, query = "https://www.youtube.com/watch?v=M_uPKpvf918", "diagram"
+    youtube_url, query = "https://www.youtube.com/watch?v=M_uPKpvf918", "diagram"
     # youtube_url, query = "https://www.youtube.com/watch?v=yYFmYWpMPlE", "tech stack diagram"
-    youtube_url, query = "https://www.youtube.com/watch?v=SaSZdCauekg", "green blanket"
+    youtube_url, query = "https://www.youtube.com/watch?v=SaSZdCauekg", "teddy bear"
 
-    process_video_visuals(youtube_url)
+    process_video_visuals(youtube_url, loaded=True)
     print("Embeddings stored! Starting visual query...")
     matches = visual_query(query, max_k=1000, similarity_threshold=0.01)
     matches_sorted_by_score = sorted(matches, key=lambda x: x["score"])
     for m in matches_sorted_by_score:
-        print(f"Score: {m['score']:.3f}, TS: {m['timestamp']}")
+        print(f"Score: {m['score']:.3f}, TS: {m['timestamp']:.0f}")
