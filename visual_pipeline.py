@@ -1,13 +1,9 @@
 import yt_dlp
 import re
-import torch
-import chromadb
 import cv2
 import os
 import numpy as np
 from pathlib import Path
-from PIL import Image
-from transformers import CLIPProcessor, CLIPModel
 
 # Video Processing
 def extract_video_id(youtube_url):
@@ -63,8 +59,18 @@ def extract_raw_frames(video_url, output_dir, interval_seconds=5):
         # If direct URL doesn't work, download video first
         import yt_dlp
         ydl_opts = {
-            'format': 'best[height<=720]',  # Limit quality for processing
-            'outtmpl': 'temp_video.%(ext)s'
+            # 'format': 'best[height<=720]',  # Limit quality for processing
+            # 'outtmpl': 'temp_video.%(ext)s'
+            'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
+            'outtmpl': 'temp_video.%(ext)s',
+            # 'continuedl': False,  # Disable resuming partial downloads
+            # 'noprogress': True,
+            # 'quiet': True,
+            # 'no_warnings': True,
+            # 'skip_unavailable_fragments': True,
+            'retries': 3,
+            'fragment_retries': 3,
+            'download_sections': [{'section': {'start_time': 45, 'end_time': 115}}]
         }
         
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -194,88 +200,148 @@ def filter_significant_frames(processed_frames, threshold=0.3):
     return significant_frames
 
 # Embeddings
-def create_vid_embeddings(vid_id, filtered_frames):
-    # Choose a model; "openai/clip-vit-base-patch16" is common and lightweight
-    model_name = "openai/clip-vit-base-patch16"
-    model = CLIPModel.from_pretrained(model_name)
-    processor = CLIPProcessor.from_pretrained(model_name, use_fast=True) # use_fast requires PyTorch
-    model.eval()
+from langchain_chroma import Chroma
+from langchain_core.embeddings import Embeddings
+from langchain_core.documents import Document
+from typing import List
+import numpy as np
 
-    frame_embeddings = []
+class CLIPImageEmbeddings(Embeddings):
+    """Custom CLIP image embedding class for LangChain integration"""
+    def __init__(self, model_name="openai/clip-vit-base-patch16"):
+        from transformers import CLIPModel, CLIPProcessor
+        self.model = CLIPModel.from_pretrained(model_name)
+        self.processor = CLIPProcessor.from_pretrained(model_name)
+        self.model.eval()
 
-    for frame_info in filtered_frames:
-        timestamp = frame_info['timestamp']
-        frame_path = frame_info['processed_path']
+    def embed_documents(self, image_paths: List[str]) -> List[List[float]]:
+        """Embed a list of image paths using CLIP"""
+        from PIL import Image
+        import torch
+        
+        embeddings = []
+        for path in image_paths:
+            image = Image.open(path).convert("RGB")
+            inputs = self.processor(images=image, return_tensors="pt")
+            with torch.no_grad():
+                features = self.model.get_image_features(**inputs)
+                features = features / features.norm(p=2, dim=-1, keepdim=True)
+                embeddings.append(features.cpu().numpy()[0].tolist())
+        return embeddings
 
-        image = Image.open(frame_path).convert("RGB")
-        inputs = processor(images=image, return_tensors="pt")
-
+    def embed_query(self, text: str) -> List[float]:
+        """Embed text query using CLIP"""
+        import torch
+        inputs = self.processor(text=text, return_tensors="pt", padding=True)
         with torch.no_grad():
-            image_features = model.get_image_features(**inputs)
-            image_features = image_features / image_features.norm(p=2, dim=-1, keepdim=True)
-            embedding = image_features.cpu().numpy()[0]
-
-        frame_embeddings.append({
-            'embedding': embedding,
-            'timestamp': timestamp,
-            'frame_path': frame_path
-        })
-
-    # print("Frame Embeddings[0]:", frame_embeddings[0])
-
-    return frame_embeddings
+            features = self.model.get_text_features(**inputs)
+            features = features / features.norm(p=2, dim=-1, keepdim=True)
+            return features.cpu().numpy()[0].tolist()
 
 def store_vid_embeddings(vid_id, frame_embeddings, collection_name):
-    client = chromadb.Client()
-    collection = client.get_or_create_collection(collection_name)
-
-    for frame in frame_embeddings:
-        collection.add(
-            embeddings=[frame['embedding']],
-            metadatas=[{
+    """Store embeddings using LangChain's Chroma integration"""
+    # Create LangChain documents with metadata
+    documents = [
+        Document(
+            page_content=frame['processed_path'],  # Use path as content
+            metadata={
                 'timestamp': frame['timestamp'],
-                'frame_path': frame['frame_path'],
-                'video_id': vid_id
-            }],
-            ids=[f"{vid_id}_{int(frame['timestamp'])}"]
-        )
+                'video_id': vid_id,
+                'processed_path': frame['processed_path']
+            }
+        ) for frame in frame_embeddings
+    ]
+    
+    # Extract image paths for embedding
+    image_paths = [frame['processed_path'] for frame in frame_embeddings]
+    
+    # Initialize Chroma with CLIP embeddings
+    vector_store = Chroma.from_documents(
+        documents=documents,
+        embedding=CLIPImageEmbeddings(),
+        collection_name=collection_name,
+        persist_directory=None,  # In-memory for MVP
+        collection_metadata={"hnsw:space": "cosine"}
+    )
+    
+    print(f"Stored {len(documents)} embeddings in Chroma collection: {collection_name}")
+    return vector_store
 
-    print("Embeddings stored in chroma collection:", collection_name)
-    return collection_name
+# Main querying function
+def visual_query(query_text, max_k=20, similarity_threshold=0.3, 
+                collection_name="video_frame_embeddings"):
+    """Perform visual similarity search using LangChain"""
+    # Initialize Chroma with CLIP embeddings
+    vector_store = Chroma(
+        collection_name=collection_name,
+        embedding_function=CLIPImageEmbeddings(),
+        persist_directory=None,
+        collection_metadata={"hnsw:space": "cosine"}
+    )
+    
+    # Perform similarity search with threshold
+    results = vector_store.similarity_search_with_relevance_scores(
+        query=query_text,
+        k=max_k,
+        score_threshold=similarity_threshold
+    )
+    
+    # Format results
+    matches = [{
+        'timestamp': doc.metadata['timestamp'],
+        'processed_path': doc.metadata['processed_path'],
+        'score': score
+    } for doc, score in results]
 
-# Main visual processing function to be called by API route
-def process_video_visuals(youtube_url, output_dir="./video_data", 
-                        #   frame_interval_seconds=None, 
-                        #   processed_img_size=None, motion_detect_threshold=None, 
-                          chroma_collection_name="video_frame_embeddings"):
-    '''
-    Main logic for processing a YT vid, creating frame embeddings, 
-    and storing embeddings into Chroma DB for future query comparisons
-    '''
+    return matches
+
+# Main visual processing + embedding function
+def process_video_visuals(youtube_url, output_dir="./video_data",
+                         chroma_collection_name="video_frame_embeddings"):
+    '''Main video processing pipeline'''
     metadata = get_video_metadata(youtube_url)
     vid_id = metadata['video_id']
-    if not vid_id:
-        print("WARNING: No Vid ID found")
-
+    
     frame_output_dir = os.path.join(output_dir, vid_id)
 
     extracted_frames = extract_raw_frames(youtube_url, frame_output_dir)
     processed_frames = preprocess_frames(extracted_frames)
     significant_frames = filter_significant_frames(processed_frames)
+
+    frames_to_embed = significant_frames
+    frames_to_embed = processed_frames
     
     print(f"Processed video: {metadata}")
     print(f"Num Raw frames extracted: {len(extracted_frames)}")    
-    print(f"Num Filtered/Processed frames: {len(significant_frames)}")    
+    print(f"Num Filtered/Processed frames: {len(frames_to_embed)}")   
+    # print(f"Frame_to_embed 0: {frames_to_embed[0].keys()}") 
     
-    frame_embeddings = create_vid_embeddings(vid_id, significant_frames)
+    # Create frame embeddings using CLIP
+    print("Creating embeddings...")
+    embedding_model = CLIPImageEmbeddings()
+    image_paths = [frame['processed_path'] for frame in frames_to_embed]
+    embeddings = embedding_model.embed_documents(image_paths)
+    
+    # Add embeddings to frame info
+    frame_embeddings = [{
+        **frame,
+        'embedding': emb
+    } for frame, emb in zip(frames_to_embed, embeddings)]
+    
+    # Store using LangChain Chroma
+    print("Storing embeddings...")
     store_vid_embeddings(vid_id, frame_embeddings, chroma_collection_name)
-
+    
     return 0
 
-# TODO: Natural Language Queries and Similarity Searches
-
 if __name__ == "__main__":
-    youtube_url = "https://www.youtube.com/watch?v=M_uPKpvf918"
-    # youtube_url = "https://www.youtube.com/watch?v=SaSZdCauekg"
+    # youtube_url, query = "https://www.youtube.com/watch?v=M_uPKpvf918", "diagram"
+    # youtube_url, query = "https://www.youtube.com/watch?v=yYFmYWpMPlE", "tech stack diagram"
+    youtube_url, query = "https://www.youtube.com/watch?v=SaSZdCauekg", "green blanket"
 
     process_video_visuals(youtube_url)
+    print("Embeddings stored! Starting visual query...")
+    matches = visual_query(query, max_k=1000, similarity_threshold=0.01)
+    matches_sorted_by_score = sorted(matches, key=lambda x: x["score"])
+    for m in matches_sorted_by_score:
+        print(f"Score: {m['score']:.3f}, TS: {m['timestamp']}")
