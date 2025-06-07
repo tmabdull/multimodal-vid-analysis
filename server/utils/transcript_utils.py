@@ -15,51 +15,55 @@ def seconds_to_hhmmss(seconds):
     return str(datetime.timedelta(seconds=int(seconds)))
 
 def get_transcript(video_url):
-    ydl_opts = {
-        'skip_download': True,
-        'writesubtitles': True,
-        'writeautomaticsub': True,
-        'subtitlesformat': 'json3',
-        'quiet': True,
-        'no_warnings': True
-    }
+    try:
+        ydl_opts = {
+            'skip_download': True,
+            'writesubtitles': True,
+            'writeautomaticsub': True,
+            'subtitlesformat': 'json3',
+            'quiet': True,
+            'no_warnings': True
+        }
 
-    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-        info = ydl.extract_info(video_url, download=False)
-        auto_captions = info.get('automatic_captions', {})
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(video_url, download=False)
+            auto_captions = info.get('automatic_captions', {})
 
-        if 'en' not in auto_captions:
-            print("No English auto-captions found.")
-            return {}
+            if 'en' not in auto_captions:
+                print("No English auto-captions found.")
+                return []
 
-        transcript_url = auto_captions['en'][0].get('url')
-        if not transcript_url:
-            print("No transcript URL found.")
-            return {}
+            transcript_url = auto_captions['en'][0].get('url')
+            if not transcript_url:
+                print("Transcript URL not found.")
+                return []
 
-        response = requests.get(transcript_url)
-        if response.status_code != 200:
-            print(f"Failed to download transcript: {response.status_code}")
-            return {}
+            response = requests.get(transcript_url)
+            if response.status_code != 200:
+                print(f"Failed to fetch transcript. HTTP {response.status_code}")
+                return []
 
-        transcript_data = response.json()
-        events = transcript_data.get('events', [])
-        transcript_list = []
+            transcript_data = response.json()
+            events = transcript_data.get('events', [])
+            transcript_list = []
 
-        for event in events:
-            if 'segs' in event and 'tStartMs' in event:
-                text = ''.join(seg['utf8'] for seg in event['segs']).strip()
-                if text:
-                    start_sec = int(event['tStartMs']) / 1000
-                    timestamp = seconds_to_hhmmss(start_sec)
-                    transcript_list.append({
-                        "text": text,
-                        "start": timestamp,
-                        "start_seconds": start_sec,
-                        "video_url": video_url
-                    })
+            for event in events:
+                if 'segs' in event and 'tStartMs' in event:
+                    text = ''.join(seg['utf8'] for seg in event['segs']).strip()
+                    if text:
+                        start_sec = int(event['tStartMs']) / 1000
+                        timestamp = seconds_to_hhmmss(start_sec)
+                        transcript_list.append({
+                            "text": text,
+                            "start": timestamp,
+                            "start_seconds": start_sec,
+                            "video_url": video_url
+                        })
 
-    return transcript_list
+            return transcript_list
+    except Exception as e:
+        print(f"[get_transcript] Error: {e}")
+        return []
 
 def chunk_transcript(transcript, chunk_size):
     chunks = []
@@ -159,46 +163,6 @@ def find_relevant_chunks(embeddings, user_query, top_k=3, similarity_threshold=0
         }
         for score, chunk in top_chunks
     ]
-
-#  const prompt = `
-#   Analyze this video transcript and provide a JSON response with:
-#   1. A comprehensive summary
-#   2. Key sections with estimated timestamps
-#   3. Main topics covered
-
-#   Format the response as JSON:
-#   {
-#     "summary": "detailed summary here",
-#     "sections": [
-#       {
-#         "timestamp": 0,
-#         "title": "Introduction",
-#         "description": "Brief description"
-#       }
-#     ]
-#   }
-# `;
-
-# const prompt = `
-#   Based on this video context, answer the following question:
-  
-#   Context: ${JSON.stringify(context)}
-  
-#   Question: ${question}
-  
-#   Provide a helpful answer. If your answer references a specific part of the video, include a timestamp if available.
-# `;
-
-
-# const prompt = `
-#   Search for "${query}" in this video context and return relevant timestamps.
-  
-#   Video Context: ${JSON.stringify(videoContext)}
-  
-#   IMPORTANT: Return ONLY a JSON array of results. Do NOT include any extra text or formatting outside the JSON array.
-#   The format should be an array of objects, each with 'timestamp' (number), 'description' (string), and 'confidence' (number 0-1).
-#   Example: [{"timestamp": 123, "description": "...", "confidence": 0.8}]
-# `;
 
 def generate_sections_with_timestamps(transcript_list):
     """
