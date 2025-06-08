@@ -273,3 +273,20 @@ def generate_rag_response(relevant_chunks,user_prompt):
     )
 
     return response
+
+if __name__ == "__main__":
+
+    youtube_url = "https://www.youtube.com/watch?v=h5gvVo7rhxQ"
+    transcript_list = get_transcript(youtube_url)
+    chunks = chunk_transcript(transcript_list, 1000)
+
+
+    embeded_chunks = embed_chunks(chunks)
+    user_query = "Why does batman take the blame for Dent?"
+    relevant_chunks = find_relevant_chunks(embeded_chunks, user_query)
+    # rag_response = generate_rag_response(relevant_chunks, user_query)
+
+    # print(rag_response)
+
+    timestamps = generate_sections_with_timestamps(transcript_list)
+    print(timestamps)
