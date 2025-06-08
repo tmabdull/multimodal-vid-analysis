@@ -1,15 +1,29 @@
 from typing import List, Optional
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
+from fastapi.middleware.cors import CORSMiddleware
 
-from .utils.transcript_utils import (
+from api.utils.transcript_utils import (
     get_transcript, chunk_transcript, embed_chunks, find_relevant_chunks,
     generate_sections_with_timestamps, generate_rag_response
 )
-from .utils.visual_pipeline_utils import create_vid_embeddings, visual_query
+from api.utils.visual_pipeline_utils import create_vid_embeddings, visual_query
 
 CHUNK_SIZE = 500  # Can be adjusted based on your needs
 app = FastAPI()
+
+origins = [
+    "http://localhost:3000",  # Your frontend URL
+    "http://localhost:8000",  # If your backend also serves a frontend
+]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins,
+    allow_credentials=True,
+    allow_methods=["*"],  # Allows all methods (GET, POST, PUT, DELETE, OPTIONS)
+    allow_headers=["*"],  # Allows all headers
+)
 
 class VideoRequest(BaseModel):
     youtube_url: str
@@ -51,7 +65,7 @@ def visual_query_api(req: VisualQueryRequest):
 # -------------------------------
 
 @app.post("/create_text_embeddings")
-async def create_text_embeddings(req: VideoRequest):
+def create_text_embeddings(req: VideoRequest):
     try:
         transcript = get_transcript(req.youtube_url)
         if not transcript:
@@ -65,7 +79,7 @@ async def create_text_embeddings(req: VideoRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/text_query")
-async def handle_user_query(req: TextQueryRequest):
+def handle_user_query(req: TextQueryRequest):
     try:
         relevant_chunks = find_relevant_chunks(
             embedded_chunks = req.embedded_chunks,
@@ -87,7 +101,7 @@ async def handle_user_query(req: TextQueryRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/sections")
-async def get_video_sections(req: VideoRequest):
+def get_video_sections(req: VideoRequest):
     try:
 
         transcript = get_transcript(req.youtube_url)

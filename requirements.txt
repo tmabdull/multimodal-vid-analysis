@@ -1,0 +1,13 @@
+yt-dlp
+ffmpeg-python
+opencv-python
+numpy
+pillow
+langchain-core
+langchain-chroma==0.2.4
+transformers
+torch
+fastapi
+uvicorn
+dotenv
+openai==0.28.1
