@@ -8,6 +8,7 @@ from .utils.transcript_utils import (
 )
 from .utils.visual_pipeline_utils import create_vid_embeddings, visual_query
 
+CHUNK_SIZE = 500  # Can be adjusted based on your needs
 app = FastAPI()
 
 class VideoRequest(BaseModel):
@@ -15,6 +16,16 @@ class VideoRequest(BaseModel):
 
 class VisualQueryRequest(BaseModel):
     query_text: str
+
+class TextQueryRequest(BaseModel):
+    embedded_chunks: list[dict]
+    user_query: str
+    similarity_threshold: Optional[float] = 0.3
+    top_k: Optional[int] = 3
+
+# -------------------------------
+# Video Processing Routes
+# -------------------------------
 
 @app.post("/create_vid_embeddings")
 def create_vid_embeddings_api(req: VideoRequest):
@@ -35,45 +46,38 @@ def visual_query_api(req: VisualQueryRequest):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-CHUNK_SIZE = 1000  # Can be adjusted based on your needs
-
 # -------------------------------
-# Request/Response Models
+# Transcript Processing Routes
 # -------------------------------
 
-class TextQueryRequest(BaseModel):
-    video_url: str
-    user_query: str
-    similarity_threshold: Optional[float] = 0.3
-    top_k: Optional[int] = 3
-
-class SectionRequest(BaseModel):
-    video_url: str
-
-# -------------------------------
-# /query Route
-# -------------------------------
-
-@app.post("/text_query")
-async def handle_user_query(payload: TextQueryRequest):
+@app.post("/create_text_embeddings")
+async def create_text_embeddings(req: VideoRequest):
     try:
-        transcript = get_transcript(payload.video_url)
+        transcript = get_transcript(req.youtube_url)
         if not transcript:
             raise HTTPException(status_code=404, detail="Transcript not found.")
 
         chunks = chunk_transcript(transcript, chunk_size=CHUNK_SIZE)
         embedded_chunks = embed_chunks(chunks)
+
+        return embedded_chunks
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/text_query")
+async def handle_user_query(req: TextQueryRequest):
+    try:
         relevant_chunks = find_relevant_chunks(
-            embedded_chunks,
-            user_query=payload.user_query,
-            similarity_threshold=payload.similarity_threshold,
-            top_k=payload.top_k
+            embedded_chunks = req.embedded_chunks,
+            user_query=req.user_query,
+            similarity_threshold=req.similarity_threshold,
+            top_k=req.top_k
         )
 
         if not relevant_chunks:
             return {"message": "No relevant transcript chunks found."}
 
-        response = generate_rag_response(relevant_chunks, payload.user_query)
+        response = generate_rag_response(relevant_chunks, req.user_query)
         return {
             "chunks": relevant_chunks,
             "response": response.choices[0].message["content"]
@@ -82,22 +86,13 @@ async def handle_user_query(payload: TextQueryRequest):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-# -------------------------------
-# /sections Route
-# -------------------------------
-
 @app.post("/sections")
-async def get_video_sections(payload: SectionRequest):
+async def get_video_sections(req: VideoRequest):
     try:
-        print("getting transcript")
 
-        transcript = get_transcript(payload.video_url)
+        transcript = get_transcript(req.youtube_url)
         if not transcript:
             raise HTTPException(status_code=404, detail="Transcript not found.")
-
-        print("retireved transcript")
-
-        print("generating timestamps")
 
         result = generate_sections_with_timestamps(transcript)
         if result is None:
@@ -109,4 +104,3 @@ async def get_video_sections(payload: SectionRequest):
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-

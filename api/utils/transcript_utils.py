@@ -132,7 +132,7 @@ def cosine_similarity(a,b):
     return np.dot(a,b) / (np.linalg.norm(a) * np.linalg.norm(b))
     
 
-def find_relevant_chunks(embeddings, user_query, top_k=3, similarity_threshold=0.30):
+def find_relevant_chunks(embeddings, user_query, top_k=5, similarity_threshold=0.30):
     # Return top_k most relevant chunks that exceed the similarity threshold
     # Step 1: Embed the user query
     
