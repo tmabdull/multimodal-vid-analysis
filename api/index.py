@@ -13,9 +13,11 @@ app = FastAPI()
 
 class VideoRequest(BaseModel):
     youtube_url: str
+    loaded: bool = False
 
 class VisualQueryRequest(BaseModel):
     query_text: str
+    vid_id: str = ""
 
 class TextQueryRequest(BaseModel):
     embedded_chunks: list[dict]
@@ -30,9 +32,11 @@ class TextQueryRequest(BaseModel):
 @app.post("/create_vid_embeddings")
 def create_vid_embeddings_api(req: VideoRequest):
     try:
-        collection_name_with_vid_embeddings = create_vid_embeddings(req.youtube_url)
+        print("Request params:", req.youtube_url, req.loaded)
+        vid_id, collection_name_with_vid_embeddings = create_vid_embeddings(youtube_url=req.youtube_url, loaded=req.loaded)
         return {
             "status": "processed",
+            "vid_id": vid_id,
             "chroma_collection_name": collection_name_with_vid_embeddings
         }
     except Exception as e:
@@ -41,8 +45,13 @@ def create_vid_embeddings_api(req: VideoRequest):
 @app.post("/visual_query")
 def visual_query_api(req: VisualQueryRequest):
     try:
-        matches = visual_query(req.query_text)
-        return {"matches": matches}
+        print("Request params:", req.query_text, req.vid_id)
+        matches = visual_query(req.query_text, req.vid_id)
+        print("Similarity Search Complete. Matches:", matches)
+        return {
+            "status": "processed", 
+            "matches": matches
+        }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
