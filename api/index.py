@@ -67,11 +67,15 @@ def visual_query_api(req: VisualQueryRequest):
 @app.post("/create_text_embeddings")
 def create_text_embeddings(req: VideoRequest):
     try:
+        print("getting transcript")
         transcript = get_transcript(req.youtube_url)
         if not transcript:
             raise HTTPException(status_code=404, detail="Transcript not found.")
 
+        print("chunking transcript")
         chunks = chunk_transcript(transcript, chunk_size=CHUNK_SIZE)
+
+        print("embedding chunks")
         embedded_chunks = embed_chunks(chunks)
 
         return embedded_chunks
@@ -81,6 +85,7 @@ def create_text_embeddings(req: VideoRequest):
 @app.post("/text_query")
 def handle_user_query(req: TextQueryRequest):
     try:
+        print("getting relavent chunks")
         relevant_chunks = find_relevant_chunks(
             embedded_chunks = req.embedded_chunks,
             user_query=req.user_query,
@@ -91,6 +96,7 @@ def handle_user_query(req: TextQueryRequest):
         if not relevant_chunks:
             return {"message": "No relevant transcript chunks found."}
 
+        print("generating reponse")
         response = generate_rag_response(relevant_chunks, req.user_query)
         return {
             "chunks": relevant_chunks,
@@ -103,16 +109,15 @@ def handle_user_query(req: TextQueryRequest):
 @app.post("/sections")
 def get_video_sections(req: VideoRequest):
     try:
-
+        print("getting transcript")
         transcript = get_transcript(req.youtube_url)
         if not transcript:
             raise HTTPException(status_code=404, detail="Transcript not found.")
 
+        print("generating summary and sections")
         result = generate_sections_with_timestamps(transcript)
         if result is None:
             raise HTTPException(status_code=500, detail="Failed to generate sections.")
-        
-        print("generated timestamps")
 
         return result
 
