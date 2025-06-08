@@ -13,7 +13,7 @@ class QueryRequest(BaseModel):
 @app.post("/create_vid_embeddings")
 def create_vid_embeddings_api(req: VideoRequest):
     try:
-        collection_name_with_vid_embeddings = create_vid_embeddings(req.youtube_url, loaded=True)
+        collection_name_with_vid_embeddings = create_vid_embeddings(req.youtube_url)
         return {
             "status": "processed",
             "chroma_collection_name": collection_name_with_vid_embeddings

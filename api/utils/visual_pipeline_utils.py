@@ -357,8 +357,9 @@ if __name__ == "__main__":
     youtube_url, query = "https://www.youtube.com/watch?v=M_uPKpvf918", "diagram"
     # youtube_url, query = "https://www.youtube.com/watch?v=yYFmYWpMPlE", "tech stack diagram"
     # youtube_url, query = "https://www.youtube.com/watch?v=SaSZdCauekg", "teddy bear"
+    youtube_url, query = "https://www.youtube.com/watch?v=h5gvVo7rhxQ", "mouse"
 
-    create_vid_embeddings(youtube_url, loaded=False)
+    create_vid_embeddings(youtube_url, loaded=True)
     print("Embeddings stored! Starting visual query...")
     matches = visual_query(query, max_k=1000, similarity_threshold=0.01)
     matches_sorted_by_score = sorted(matches, key=lambda x: x["score"])
