@@ -33,7 +33,8 @@ def get_transcript(video_url):
             'writeautomaticsub': True,
             'subtitlesformat': 'json3',
             'quiet': True,
-            'no_warnings': True
+            'no_warnings': True,
+            'cookiefile': 'api/utils/youtube.com_cookies.txt',  # <-- Add this line
         }
 
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -75,6 +76,7 @@ def get_transcript(video_url):
     except Exception as e:
         print(f"[get_transcript] Error: {e}")
         return []
+
 
 def chunk_transcript(transcript, chunk_size):
     chunks = []

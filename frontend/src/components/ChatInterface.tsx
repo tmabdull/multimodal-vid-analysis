@@ -54,12 +54,12 @@ export const ChatInterface = ({ embeddedChunks, onTimestampClick }: ChatInterfac
       setIsLoading(false);
     }
   };
-
   return (
-    <div className="bg-gray-800 rounded-lg p-6 h-[600px] flex flex-col">
+    <div className="bg-gray-800 rounded-lg h-[600px] flex flex-col p-6">
       <h2 className="text-2xl font-semibold mb-4">Chat with Video</h2>
-      
-      <div className="flex-1 overflow-y-auto space-y-4 mb-4">
+  
+      {/* Scrollable message list */}
+      <div className="flex-1 overflow-y-auto space-y-4">
         {messages.map((message, index) => (
           <div
             key={index}
@@ -84,8 +84,9 @@ export const ChatInterface = ({ embeddedChunks, onTimestampClick }: ChatInterfac
           </div>
         ))}
       </div>
-
-      <form onSubmit={handleSubmit} className="flex gap-2">
+  
+      {/* Input bar pinned to the bottom */}
+      <form onSubmit={handleSubmit} className="mt-4 flex gap-2">
         <input
           type="text"
           value={input}
@@ -103,5 +104,5 @@ export const ChatInterface = ({ embeddedChunks, onTimestampClick }: ChatInterfac
         </button>
       </form>
     </div>
-  );
+  );  
 }; 

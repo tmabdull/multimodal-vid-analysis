@@ -16,17 +16,25 @@ export const VideoAnalysis = ({ sections, onTimestampClick }: VideoAnalysisProps
       <div className="space-y-4">
         {sections.map((section, index) => (
           <div key={index} className="bg-gray-700 rounded-lg p-4">
-            <button
-              onClick={() => onTimestampClick(section.timestamp)}
-              className="text-blue-400 hover:text-blue-300 font-mono mb-2"
-            >
-              {section.timestamp}
-            </button>
             <h3 className="text-lg font-medium mb-2">{section.title}</h3>
-            <p className="text-gray-300">{section.description}</p>
+            <p className="text-gray-300">
+            <a
+              onClick={() => onTimestampClick(section.timestamp)}
+              className="font-mono cursor-pointer mr-2"
+              style={{
+                color: 'rgb(96, 165, 250)', // initial color (similar to Tailwind blue-400)
+              }}
+              onMouseEnter={(e) => (e.currentTarget.style.color = 'rgb(238, 203, 63)')}
+              onMouseLeave={(e) => (e.currentTarget.style.color = 'rgb(96, 165, 250)')}
+            >
+              [{section.timestamp}]
+            </a>
+
+              {section.description}
+            </p>
           </div>
         ))}
       </div>
     </div>
   );
-}; 
+};
