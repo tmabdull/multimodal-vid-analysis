@@ -1,10 +1,10 @@
 'use client';
 
 import { useState, useRef, useEffect, FormEvent } from 'react';
-import { VideoPlayer } from '../components/VideoPlayer';
-import { VideoAnalysis } from '../components/VideoAnalysis';
-import { ChatInterface } from '../components/ChatInterface';
-import { VisualQuery } from '../components/VisualQuery';
+import { VideoPlayer } from '@/components/VideoPlayer';
+import { VideoAnalysis } from '@/components/VideoAnalysis';
+import { ChatInterface } from '@/components/ChatInterface';
+import { VisualQuery } from '@/components/VisualQuery';
 
 interface Message {
   role: 'user' | 'assistant';

@@ -1,9 +1,6 @@
 #internal notes
 notes.md
 
-.venv
-.vscode
-
 node_modules/
 
 .DS_Store
