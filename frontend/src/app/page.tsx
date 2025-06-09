@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, FormEvent } from 'react';
 import { VideoPlayer } from '@/components/VideoPlayer';
 import { VideoAnalysis } from '@/components/VideoAnalysis';
 import { ChatInterface } from '@/components/ChatInterface';
@@ -11,16 +11,15 @@ interface Message {
   content: string;
 }
 
-interface Timestamp {
-  text: string;
-  start: number;
-  end: number;
+interface SectionFromBackend {
+  timestamp: string;
+  title: string;
+  description: string;
 }
 
 interface Analysis {
   summary: string;
-  key_points: string[];
-  timestamps: Timestamp[];
+  sections: SectionFromBackend[];
 }
 
 export default function Home() {
@@ -32,11 +31,22 @@ export default function Home() {
   const [inputMessage, setInputMessage] = useState('');
   const [isChatLoading, setIsChatLoading] = useState(false);
   const [embeddedChunks, setEmbeddedChunks] = useState<any[]>([]);
+  const [isCreatingEmbeddings, setIsCreatingEmbeddings] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const videoRef = useRef<HTMLIFrameElement>(null);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  };
+
+  const hhmmssToSeconds = (hhmmss: string): number => {
+    const parts = hhmmss.split(':').map(Number);
+    if (parts.length === 3) {
+      return parts[0] * 3600 + parts[1] * 60 + parts[2];
+    } else if (parts.length === 2) {
+      return parts[0] * 60 + parts[1];
+    }
+    return 0;
   };
 
   useEffect(() => {
@@ -49,7 +59,7 @@ export default function Home() {
     return match && match[2].length === 11 ? match[2] : null;
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
     const id = extractVideoId(url);
     if (!id) {
@@ -64,15 +74,6 @@ export default function Home() {
     setEmbeddedChunks([]);
 
     try {
-      // Create video embeddings
-      await fetch('http://localhost:8000/create_vid_embeddings', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ youtube_url: url }),
-      });
-
       // Get text embeddings
       const textEmbeddingsResponse = await fetch('http://localhost:8000/create_text_embeddings', {
         method: 'POST',
@@ -109,11 +110,10 @@ export default function Home() {
       // Format the analysis data
       setAnalysis({
         summary: sectionsData.summary || 'No summary available',
-        key_points: sectionsData.key_points || [],
-        timestamps: sectionsData.timestamps || [],
+        sections: sectionsData.sections || [],
       });
 
-      console.log('Analysis timestamps after setting state:', sectionsData.timestamps);
+      console.log('Analysis timestamps after setting state:', sectionsData.sections);
 
     } catch (error) {
       console.error('Error analyzing video:', error);
@@ -123,19 +123,50 @@ export default function Home() {
     }
   };
 
-  const handleTimestampClick = (start: number) => {
-    const iframe = document.querySelector('iframe');
-    if (iframe) {
-      iframe.src = `https://www.youtube.com/embed/${videoId}?start=${start}&autoplay=1`;
+  const handleCreateVideoEmbeddings = async () => {
+    if (!url) {
+      alert('Please enter a YouTube URL first');
+      return;
+    }
+
+    setIsCreatingEmbeddings(true);
+    try {
+      const response = await fetch('http://localhost:8000/create_vid_embeddings', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ youtube_url: url }),
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to create video embeddings');
+      }
+
+      const data = await response.json();
+      alert('Video embeddings created successfully!');
+    } catch (error) {
+      console.error('Error creating video embeddings:', error);
+      alert('Failed to create video embeddings. Please try again.');
+    } finally {
+      setIsCreatingEmbeddings(false);
     }
   };
 
-  const handleSendMessage = async (e: React.FormEvent) => {
+  const handleTimestampClick = (start: string) => {
+    const iframe = document.querySelector('iframe');
+    if (iframe) {
+      const startSeconds = hhmmssToSeconds(start);
+      iframe.src = `https://www.youtube.com/embed/${videoId}?start=${startSeconds}&autoplay=1`;
+    }
+  };
+
+  const handleSendMessage = async (e: FormEvent) => {
     e.preventDefault();
     if (!inputMessage.trim() || !videoId || embeddedChunks.length === 0) return;
 
     const newMessage: Message = { role: 'user', content: inputMessage };
-    setMessages(prev => [...prev, newMessage]);
+    setMessages((prev: Message[]) => [...prev, newMessage]);
     setInputMessage('');
     setIsChatLoading(true);
 
@@ -158,79 +189,39 @@ export default function Home() {
       }
 
       const data = await response.json();
-      setMessages(prev => [...prev, { role: 'assistant', content: data.response }]);
+      setMessages((prev: Message[]) => [...prev, { role: 'assistant', content: data.response }]);
     } catch (error) {
       console.error('Error sending message:', error);
-      setMessages(prev => [...prev, { role: 'assistant', content: 'Sorry, I encountered an error. Please try again.' }]);
+      setMessages((prev: Message[]) => [...prev, { role: 'assistant', content: 'Sorry, I encountered an error. Please try again.' }]);
     } finally {
       setIsChatLoading(false);
     }
   };
 
   return (
-    <main className="container">
-      <div className="header">
-        <h1>YouTube Video Analysis</h1>
-        <p>Enter a YouTube URL to analyze the video content</p>
-      </div>
-
-      <form onSubmit={handleSubmit} className="input-group">
+    <main className="min-h-screen p-8">
+      <form onSubmit={handleSubmit} className="mb-8">
         <input
           type="text"
           value={url}
           onChange={(e) => setUrl(e.target.value)}
           placeholder="Enter YouTube URL"
-          required
+          className="w-full p-2 mb-2 rounded"
         />
-        <button type="submit" className="button" disabled={isLoading}>
-          {isLoading ? 'Analyzing...' : 'Analyze Video'}
+        <button type="submit" className="w-full p-2 bg-blue-500 text-white rounded" disabled={isLoading}>
+          {isLoading ? 'Loading...' : 'Load Video'}
         </button>
       </form>
 
       {videoId && (
-        <div className="grid">
-          <div className="card">
-            <h2>Video</h2>
-            <div className="video-container">
-              <iframe
-                src={`https://www.youtube.com/embed/${videoId}`}
-                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-                allowFullScreen
-              />
-            </div>
-
-            {analysis && (
-              <>
-                <div className="section">
-                  <h3>Summary</h3>
-                  <p>{analysis.summary}</p>
-                </div>
-
-                <div className="section">
-                  <h3>Key Points</h3>
-                  <ul>
-                    {analysis.key_points.map((point, index) => (
-                      <li key={index}>{point}</li>
-                    ))}
-                  </ul>
-                </div>
-
-                <div className="section">
-                  <h3>Timestamps</h3>
-                  <div>
-                    {analysis.timestamps.map((timestamp, index) => (
-                      <span
-                        key={index}
-                        className="timestamp"
-                        onClick={() => handleTimestampClick(timestamp.start)}
-                      >
-                        {timestamp.text}
-                      </span>
-                    ))}
-                  </div>
-                </div>
-              </>
-            )}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+          <div>
+            <VideoPlayer videoId={videoId} ref={videoRef} />
+            {analysis && analysis.sections.length > 0 && <VideoAnalysis sections={analysis.sections.map(section => ({
+              timestamp: String(section.timestamp),
+              title: section.title,
+              description: section.description
+            }))} onTimestampClick={handleTimestampClick} />}
           </div>
 
           <div className="card">
@@ -262,6 +253,13 @@ export default function Home() {
                   Send
                 </button>
               </form>
+              <button
+                onClick={handleCreateVideoEmbeddings}
+                disabled={isCreatingEmbeddings || !url}
+                className="button mt-4 w-full"
+              >
+                {isCreatingEmbeddings ? 'Creating Video Embeddings...' : 'Create Video Embeddings'}
+              </button>
             </div>
           </div>
         </div>

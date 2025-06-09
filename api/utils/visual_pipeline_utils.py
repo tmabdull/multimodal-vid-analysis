@@ -55,7 +55,11 @@ def extract_raw_frames(youtube_url, duration, output_dir, interval_seconds=None)
     # yt-dlp download options: limit to 720p, video only (no audio)
     ydl_opts = {
         # 'download_sections': [{'section': {'start_time': 45, 'end_time': 115}}],
-        'format': 'bestvideo[height<=720][ext=mp4]/best[height<=720][ext=mp4]/bestvideo+bestaudio/best',
+        'format': '''bestvideo[ext=mp4][vcodec^=avc1][height<=720]/
+                    best[ext=mp4][vcodec^=avc1][height<=720]/
+                    bestvideo[ext=mp4][height<=720]/
+                    best[ext=mp4][height<=720]/
+                    best''',
         'outtmpl': 'temp_video.%(ext)s',
         'retries': 3,
         'fragment_retries': 3
@@ -269,7 +273,7 @@ def store_vid_embeddings(vid_id, frame_embeddings, collection_name):
     return vector_store
 
 # Main querying function
-def visual_query(query_text, max_k=20, similarity_threshold=0.1, 
+def visual_query(query_text, vid_id="", max_k=20, similarity_threshold=0.1, 
                 collection_name="video_frame_embeddings"):
     """
     Perform visual similarity search using LangChain
@@ -284,19 +288,27 @@ def visual_query(query_text, max_k=20, similarity_threshold=0.1,
     )
     
     # Perform similarity search with threshold
-    print("Running similarity search...")
-    results = vector_store.similarity_search_with_relevance_scores(
-        query=query_text,
-        k=max_k,
-        score_threshold=similarity_threshold
-    )
+    print("Running similarity search...") 
+    if not vid_id or vid_id == "": # We assume the user is only doing 1 vid
+        results = vector_store.similarity_search_with_relevance_scores(
+            query=query_text,
+            k=max_k,
+            score_threshold=similarity_threshold
+        )
+    else: 
+        results = vector_store.similarity_search_with_relevance_scores(
+            query=query_text,
+            k=max_k,
+            filter={"video_id": vid_id},
+            score_threshold=similarity_threshold
+        )
     
     # Format results
-    matches = [{
-        'timestamp': doc.metadata['timestamp'],
-        'frame_path': doc.metadata['frame_path'],
-        'score': score
-    } for doc, score in results]
+    matches = [ {
+                    'timestamp': doc.metadata['timestamp'],
+                    'frame_path': doc.metadata['frame_path'],
+                    'score': score
+                } for doc, score in results ]
 
     return matches
 
@@ -351,7 +363,7 @@ def create_vid_embeddings(youtube_url, loaded=False, output_dir="./video_data",
     print("Storing embeddings...")
     store_vid_embeddings(vid_id, frame_embeddings, chroma_collection_name)
     
-    return chroma_collection_name
+    return vid_id, chroma_collection_name
 
 if __name__ == "__main__":
     youtube_url, query = "https://www.youtube.com/watch?v=M_uPKpvf918", "diagram"

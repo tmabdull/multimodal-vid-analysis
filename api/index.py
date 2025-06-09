@@ -87,7 +87,7 @@ def handle_user_query(req: TextQueryRequest):
     try:
         print("getting relavent chunks")
         relevant_chunks = find_relevant_chunks(
-            embedded_chunks = req.embedded_chunks,
+            embeddings=req.embedded_chunks,
             user_query=req.user_query,
             similarity_threshold=req.similarity_threshold,
             top_k=req.top_k

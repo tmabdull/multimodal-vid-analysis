@@ -30,7 +30,7 @@ export const ChatInterface = ({ embeddedChunks, onTimestampClick }: ChatInterfac
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          embedded_chunks: embeddedChunks,
+          embeddings: embeddedChunks,
           user_query: input,
         }),
       });
