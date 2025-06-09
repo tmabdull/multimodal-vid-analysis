@@ -32,7 +32,7 @@ export const VisualQuery = ({ videoId }: VisualQueryProps) => {
   };
 
   return (
-    <div className="bg-gray-800 rounded-lg p-6">
+    <div className="">
       <h2 className="text-2xl font-semibold mb-4">Visual Search</h2>
       
       <form onSubmit={handleSubmit} className="mb-4">
@@ -62,7 +62,10 @@ export const VisualQuery = ({ videoId }: VisualQueryProps) => {
             {matches.map((match, index) => (
               <div key={index} className="bg-gray-700 rounded-lg p-4">
                 <p className="text-sm text-gray-300 mb-2">Timestamp: {match.timestamp}</p>
-                <p className="text-white">{match.description}</p>
+                {match.frame_path && (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={match.frame_path} alt={`Match at ${match.timestamp}`} className="w-full h-auto rounded" />
+                )}
               </div>
             ))}
           </div>

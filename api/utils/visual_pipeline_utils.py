@@ -4,6 +4,9 @@ import cv2
 import os
 import numpy as np
 from pathlib import Path
+from dotenv import load_dotenv
+from collections import defaultdict
+from api.utils.transcript_utils import seconds_to_hhmmss # Import the formatting function
 
 # Video Processing
 def extract_video_id(youtube_url):
@@ -305,7 +308,7 @@ def visual_query(query_text, vid_id="", max_k=20, similarity_threshold=0.1,
     
     # Format results
     matches = [ {
-                    'timestamp': doc.metadata['timestamp'],
+                    'timestamp': seconds_to_hhmmss(doc.metadata['timestamp']),
                     'frame_path': doc.metadata['frame_path'],
                     'score': score
                 } for doc, score in results ]

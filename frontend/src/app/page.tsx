@@ -32,6 +32,7 @@ export default function Home() {
   const [isChatLoading, setIsChatLoading] = useState(false);
   const [embeddedChunks, setEmbeddedChunks] = useState<any[]>([]);
   const [isCreatingEmbeddings, setIsCreatingEmbeddings] = useState(false);
+  const [hasVideoEmbeddings, setHasVideoEmbeddings] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const videoRef = useRef<HTMLIFrameElement>(null);
 
@@ -145,6 +146,7 @@ export default function Home() {
 
       const data = await response.json();
       alert('Video embeddings created successfully!');
+      setHasVideoEmbeddings(true);
     } catch (error) {
       console.error('Error creating video embeddings:', error);
       alert('Failed to create video embeddings. Please try again.');
@@ -241,7 +243,7 @@ export default function Home() {
                 <div ref={messagesEndRef} />
               </div>
 
-              <form onSubmit={handleSendMessage} className="chat-input">
+              <form onSubmit={handleSendMessage} className="chat-input mb-4">
                 <input
                   type="text"
                   value={inputMessage}
@@ -262,6 +264,11 @@ export default function Home() {
               </button>
             </div>
           </div>
+          {hasVideoEmbeddings && videoId && (
+            <div className="card mt-4">
+              <VisualQuery videoId={videoId} />
+            </div>
+          )}
         </div>
       )}
     </main>
