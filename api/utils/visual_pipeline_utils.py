@@ -4,6 +4,9 @@ import cv2
 import os
 import numpy as np
 from pathlib import Path
+from dotenv import load_dotenv
+from collections import defaultdict
+from api.utils.transcript_utils import seconds_to_hhmmss # Import the formatting function
 
 # Video Processing
 def extract_video_id(youtube_url):

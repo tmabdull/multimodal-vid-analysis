@@ -12,7 +12,18 @@ load_dotenv()
 openai.api_key = os.getenv("OPENAI_API_KEY")
 
 def seconds_to_hhmmss(seconds):
-    return str(datetime.timedelta(seconds=int(seconds)))
+    if seconds is None:
+        return "00:00:00"
+    
+    total_seconds = int(seconds)
+    hours = total_seconds // 3600
+    minutes = (total_seconds % 3600) // 60
+    remaining_seconds = total_seconds % 60
+
+    if hours > 0:
+        return f"{hours:02}:{minutes:02}:{remaining_seconds:02}"
+    else:
+        return f"{minutes:02}:{remaining_seconds:02}"
 
 def get_transcript(video_url):
     try:
@@ -22,7 +33,8 @@ def get_transcript(video_url):
             'writeautomaticsub': True,
             'subtitlesformat': 'json3',
             'quiet': True,
-            'no_warnings': True
+            'no_warnings': True,
+            'cookiefile': 'api/utils/youtube.com_cookies.txt',  # <-- Add this line
         }
 
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -64,6 +76,7 @@ def get_transcript(video_url):
     except Exception as e:
         print(f"[get_transcript] Error: {e}")
         return []
+
 
 def chunk_transcript(transcript, chunk_size):
     chunks = []
@@ -136,6 +149,7 @@ def find_relevant_chunks(embeddings, user_query, top_k=5, similarity_threshold=0
     # Return top_k most relevant chunks that exceed the similarity threshold
     # Step 1: Embed the user query
     
+    print("embeddings user query.......")
     query_response = openai.Embedding.create(
         input=user_query,
         model="text-embedding-3-small"
@@ -143,6 +157,7 @@ def find_relevant_chunks(embeddings, user_query, top_k=5, similarity_threshold=0
     query_embedding = np.array(query_response["data"][0]["embedding"])
 
     # Step 2: Score all chunks by cosine similarity
+    print("comparing with embedded chunks.....")
     scored_embeddings = []
     for entry in embeddings:
         score = cosine_similarity(query_embedding, entry["embedding"])
@@ -153,6 +168,7 @@ def find_relevant_chunks(embeddings, user_query, top_k=5, similarity_threshold=0
     scored_embeddings.sort(key=lambda x: x[0], reverse=True)
 
     # Step 4: Return top_k matches
+    print("returning top k embeddings......")
     top_chunks = scored_embeddings[:top_k]
 
     return [
@@ -224,7 +240,7 @@ def generate_sections_with_timestamps(transcript_list):
              closest_segment = min(transcript_list,
                                    key=lambda item: abs(item['start_seconds'] - section.get('timestamp', 0)))
              processed_sections.append({
-                 "timestamp": closest_segment['start_seconds'],
+                 "timestamp": seconds_to_hhmmss(closest_segment['start_seconds']),
                  "title": section.get('title', 'Section'),
                  "description": section.get('description', 'No description provided.')
              })
